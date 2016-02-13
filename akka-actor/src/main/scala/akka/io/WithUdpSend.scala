@@ -42,28 +42,44 @@ private[io] trait WithUdpSend {
     case send: Send ⇒
       pendingSend = send
       pendingCommander = sender()
-      if (send.target.isUnresolved) {
-        Dns.resolve(send.target.getHostName)(context.system, self) match {
-          case Some(r) ⇒
-            try {
+      try {
+        if (send.target.isUnresolved) {
+          Dns.resolve(send.target.getHostName)(context.system, self) match {
+            case Some(r) ⇒
               pendingSend = pendingSend.copy(target = new InetSocketAddress(r.addr, pendingSend.target.getPort))
               doSend(registration)
-            } catch {
-              case NonFatal(e) ⇒
-                sender() ! CommandFailed(send)
-                log.debug("Failure while sending UDP datagram to remote address [{}]: {}",
-                  send.target, e)
-                retriedSend = false
-                pendingSend = null
-                pendingCommander = null
-            }
-          case None ⇒
+            case None ⇒
+              log.debug("Failure while sending UDP datagram to remote address [{}]: Host is unresolved",
+                pendingSend.target)
+              pendingCommander ! CommandFailed(pendingSend)
+              resetPending()
+          }
+        } else {
+          doSend(registration)
         }
-      } else {
-        doSend(registration)
+      } catch {
+        case NonFatal(e) ⇒
+          log.debug("Failure while sending UDP datagram to remote address [{}]: {}", pendingSend.target, e)
+          pendingCommander ! CommandFailed(pendingSend)
+          resetPending()
       }
 
-    case ChannelWritable ⇒ if (hasWritePending) doSend(registration)
+    case ChannelWritable ⇒ if (hasWritePending)
+      try {
+        doSend(registration)
+      } catch {
+        case NonFatal(e) ⇒
+          log.debug("Failure while sending UDP datagram to remote address [{}]: {}", pendingSend.target, e)
+          pendingCommander ! CommandFailed(pendingSend)
+          resetPending()
+      }
+  }
+
+  @inline
+  private def resetPending():Unit = {
+    retriedSend = false
+    pendingSend = null
+    pendingCommander = null
   }
 
   private def doSend(registration: ChannelRegistration): Unit = {

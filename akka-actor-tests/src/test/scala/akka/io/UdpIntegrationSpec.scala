@@ -4,7 +4,6 @@
 package akka.io
 
 import java.net.InetSocketAddress
-import java.nio.channels.DatagramChannel
 import akka.testkit.{ TestProbe, ImplicitSender, AkkaSpec }
 import akka.util.ByteString
 import akka.actor.ActorRef
@@ -17,7 +16,7 @@ class UdpIntegrationSpec extends AkkaSpec("""
     akka.loglevel = INFO
     akka.actor.serialize-creators = on""") with ImplicitSender {
 
-  val addresses = temporaryServerAddresses(6, udp = true)
+  val addresses = temporaryServerAddresses(8, udp = true)
 
   def bindUdp(address: InetSocketAddress, handler: ActorRef): ActorRef = {
     val commander = TestProbe()
@@ -45,9 +44,44 @@ class UdpIntegrationSpec extends AkkaSpec("""
 
     }
 
-    "be able to send several packet back and forth with binding" in {
+    "receive CommandFailed if the target port is 0" in {
+      val targetAddress = new InetSocketAddress("127.0.0.1", 0)
+      val data = ByteString("You shall not pass!")
+      simpleSender ! Send(data, targetAddress)
+
+      expectMsgType[CommandFailed].cmd should ===(Send(data, targetAddress))
+
+    }
+
+    "receive CommandFailed if the target is unreachable from binding" in {
+      val targetAddress = new InetSocketAddress("2001:db8::", 42)
       val serverAddress = addresses(1)
-      val clientAddress = addresses(2)
+
+      val data = ByteString("Into the void!")
+      val server = bindUdp(serverAddress, testActor)
+
+      server ! Send(data, targetAddress)
+
+      expectMsgType[CommandFailed].cmd should ===(Send(data, targetAddress))
+
+    }
+
+    "receive CommandFailed if the target host is not resolvable" in {
+      val targetAddress = InetSocketAddress.createUnresolved("thyhostthatnotexists", 42)
+      val serverAddress = addresses(2)
+
+      val data = ByteString("Can packets feel loneliness?")
+      val server = bindUdp(serverAddress, testActor)
+
+      server ! Send(data, targetAddress)
+
+      expectMsgType[CommandFailed].cmd should ===(Send(data, targetAddress))
+
+    }
+
+    "be able to send several packet back and forth with binding" in {
+      val serverAddress = addresses(3)
+      val clientAddress = addresses(4)
       val server = bindUdp(serverAddress, testActor)
       val client = bindUdp(clientAddress, testActor)
       val data = ByteString("Fly little packet!")
@@ -80,24 +114,24 @@ class UdpIntegrationSpec extends AkkaSpec("""
     "call SocketOption.beforeBind method before bind." in {
       val commander = TestProbe()
       val assertOption = AssertBeforeBind()
-      commander.send(IO(Udp), Bind(testActor, addresses(3), options = List(assertOption)))
-      commander.expectMsg(Bound(addresses(3)))
+      commander.send(IO(Udp), Bind(testActor, addresses(5), options = List(assertOption)))
+      commander.expectMsg(Bound(addresses(5)))
       assert(assertOption.beforeCalled === 1)
     }
 
     "call SocketOption.afterConnect method after binding." in {
       val commander = TestProbe()
       val assertOption = AssertAfterChannelBind()
-      commander.send(IO(Udp), Bind(testActor, addresses(4), options = List(assertOption)))
-      commander.expectMsg(Bound(addresses(4)))
+      commander.send(IO(Udp), Bind(testActor, addresses(6), options = List(assertOption)))
+      commander.expectMsg(Bound(addresses(6)))
       assert(assertOption.afterCalled === 1)
     }
 
     "call DatagramChannelCreator.create method when opening channel" in {
       val commander = TestProbe()
       val assertOption = AssertOpenDatagramChannel()
-      commander.send(IO(Udp), Bind(testActor, addresses(5), options = List(assertOption)))
-      commander.expectMsg(Bound(addresses(5)))
+      commander.send(IO(Udp), Bind(testActor, addresses(7), options = List(assertOption)))
+      commander.expectMsg(Bound(addresses(7)))
       assert(assertOption.openCalled === 1)
     }
   }
